@@ -1,5 +1,11 @@
 @echo off
 chcp 65001 > nul
-echo Запуск программы Mic Control...
+title Mic Control
+echo Starting Mic Control...
 .venv\Scripts\python.exe mic_control.py
-pause 
+if errorlevel 1 (
+    echo.
+    echo Program failed to start. Check the error messages above.
+    echo Press any key to exit...
+    pause > nul
+) 
