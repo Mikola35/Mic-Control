@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 > nul
 echo Starting Mic Control...
-start /min .venv\Scripts\python.exe mic_control.py
+.venv\Scripts\python.exe mic_control.py
 if errorlevel 1 (
     echo Program failed to start. Check the error messages above.
     pause > nul

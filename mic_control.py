@@ -36,6 +36,8 @@ hotkey_thread = None
 stop_hotkey_check = False
 volume_check_thread = None
 stop_volume_check = False
+microphone = None
+meter = None
 
 def get_scale_factor():
     """Получаем масштаб экрана"""
@@ -91,13 +93,20 @@ def theme_check_loop():
 
 def get_microphone():
     """Получаем доступ к микрофону"""
+    global microphone, meter
     try:
-        devices = AudioUtilities.GetMicrophone()
-        if not devices:
-            print("Микрофон не найден")
-            return None
-        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        return cast(interface, POINTER(IAudioEndpointVolume))
+        if microphone is None:
+            devices = AudioUtilities.GetMicrophone()
+            if not devices:
+                print("Микрофон не найден")
+                return None
+            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            microphone = cast(interface, POINTER(IAudioEndpointVolume))
+            
+            # Получаем доступ к измерителю уровня
+            interface = devices.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None)
+            meter = cast(interface, POINTER(IAudioMeterInformation))
+        return microphone
     except Exception as e:
         print(f"Ошибка при получении микрофона: {e}")
         return None
@@ -128,13 +137,18 @@ def toggle_microphone():
 def on_click(icon, item=None):
     """Обработчик клика по иконке"""
     try:
+        print(f"Клик по иконке: item={item}")
         if item is None:  # Это клик по иконке
+            print("Это клик по иконке (не по пункту меню)")
             print("Открываем настройки микрофона...")
             # Открываем системные настройки звука через mmsys.cpl
             os.system("control mmsys.cpl")
             return True
+        else:
+            print(f"Это клик по пункту меню: {item.text}")
     except Exception as e:
-        print(f"Ошибка при открытии настроек: {e}")
+        print(f"Ошибка при обработке клика: {e}")
+        traceback.print_exc()
     return False
 
 def create_menu():
@@ -143,10 +157,19 @@ def create_menu():
     hotkey = parse_hotkey("")
     hotkey_text = hotkey.upper().replace("+", " + ")
     
+    def on_toggle():
+        toggle_microphone()
+    
+    def on_settings():
+        os.system("control mmsys.cpl")
+    
+    def on_exit():
+        icon.stop()
+    
     return pystray.Menu(
-        pystray.MenuItem(f'Включить/Выключить микрофон ({hotkey_text})', toggle_microphone),
-        pystray.MenuItem('Настройки микрофона', lambda: os.system("control mmsys.cpl")),
-        pystray.MenuItem('Выход', lambda: icon.stop())
+        pystray.MenuItem(f'Включить/Выключить микрофон ({hotkey_text})', on_toggle),
+        pystray.MenuItem('Настройки микрофона', on_settings),
+        pystray.MenuItem('Выход', on_exit)
     )
 
 def parse_hotkey(hotkey_str):
@@ -180,15 +203,13 @@ def hotkey_check_loop():
 
 def get_microphone_peak():
     """Получаем текущий уровень входного сигнала микрофона"""
+    global meter
     try:
-        devices = AudioUtilities.GetMicrophone()
-        if not devices:
-            return 0
-        interface = devices.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None)
-        meter = cast(interface, POINTER(IAudioMeterInformation))
-        return int(meter.GetPeakValue() * 100)
+        if meter:
+            return int(meter.GetPeakValue() * 100)
     except:
-        return 0
+        pass
+    return 0
 
 def volume_check_loop():
     """Проверяем уровень входного сигнала и обновляем тултип"""
@@ -219,14 +240,32 @@ def volume_check_loop():
             pass
         time.sleep(0.1)
 
+def cleanup():
+    """Очищаем ресурсы"""
+    global microphone, meter, stop_theme_check, stop_hotkey_check, stop_volume_check
+    
+    stop_theme_check = True
+    stop_hotkey_check = True
+    stop_volume_check = True
+    
+    if theme_check_thread:
+        theme_check_thread.join()
+    if hotkey_thread:
+        hotkey_thread.join()
+    if volume_check_thread:
+        volume_check_thread.join()
+    
+    # Освобождаем COM-объекты
+    microphone = None
+    meter = None
+
 def main():
     global icon, theme_check_thread, stop_theme_check, hotkey_thread, stop_hotkey_check, volume_check_thread, stop_volume_check
     try:
         print("Запуск программы...")
         
         # Проверяем микрофон
-        microphone = get_microphone()
-        if not microphone:
+        if not get_microphone():
             print("Ошибка: микрофон не найден")
             return
             
@@ -277,16 +316,10 @@ def main():
         icon.run()
     except Exception as e:
         print(f"Критическая ошибка: {e}")
-        stop_theme_check = True
-        stop_hotkey_check = True
-        stop_volume_check = True
-        if theme_check_thread:
-            theme_check_thread.join()
-        if hotkey_thread:
-            hotkey_thread.join()
-        if volume_check_thread:
-            volume_check_thread.join()
+        cleanup()
         sys.exit(1)
+    finally:
+        cleanup()
 
 if __name__ == "__main__":
     try:
@@ -296,4 +329,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Ошибка при запуске программы: {e}")
         traceback.print_exc()
+        cleanup()
         sys.exit(1) 
