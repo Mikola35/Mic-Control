@@ -36,15 +36,23 @@ def is_dark_theme():
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
         value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
         return value == 0
-    except:
+    except Exception as e:
+        print(f"Ошибка при определении темы: {e}")
         return False
 
 def get_icon_path(filename):
     """Получаем путь к иконке с учетом темы Windows и масштабирования экрана"""
-    base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Icons")
-    theme = "dark theme" if is_dark_theme() else "light theme"
-    scale = "2x" if ctypes.windll.shcore.GetScaleFactorForDevice(0) > 100 else "1x"
-    return os.path.join(base_path, theme, scale, filename)
+    try:
+        base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Icons")
+        theme = "dark theme" if is_dark_theme() else "light theme"
+        scale = "2x" if ctypes.windll.shcore.GetScaleFactorForDevice(0) > 100 else "1x"
+        path = os.path.join(base_path, theme, scale, filename)
+        print(f"Путь к иконке: {path}")
+        return path
+    except Exception as e:
+        print(f"Ошибка при получении пути к иконке: {e}")
+        traceback.print_exc()
+        return None
 
 def get_microphone():
     try:
@@ -72,6 +80,7 @@ def toggle_microphone():
     try:
         devices = AudioUtilities.GetMicrophone()
         if not devices:
+            print("Микрофон не найден")
             return
         interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
         volume = cast(interface, POINTER(IAudioEndpointVolume))
@@ -80,14 +89,32 @@ def toggle_microphone():
         
         # Обновляем иконку
         if icon:
-            icon.icon = Image.open(get_icon_path("ic_mic.png" if not current_state else "ic_mic_muted.png"))
+            icon.icon = Image.open(get_icon_path("ic_mic.png" if current_state else "ic_mic_muted.png"))
     except Exception as e:
         print(f"Ошибка при переключении микрофона: {e}")
+        traceback.print_exc()
 
 def on_click(icon, item=None):
+    """Обработчик клика по иконке"""
     try:
-        is_enabled = toggle_microphone()
-        update_icon(icon, is_enabled)
+        print("Клик по иконке")
+        # Получаем текущее состояние микрофона
+        devices = AudioUtilities.GetMicrophone()
+        if not devices:
+            print("Микрофон не найден")
+            return
+        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        volume = cast(interface, POINTER(IAudioEndpointVolume))
+        current_state = volume.GetMute()
+        
+        # Переключаем состояние
+        volume.SetMute(1 - current_state, None)
+        
+        # Обновляем иконку
+        if icon:
+            icon_path = get_icon_path("ic_mic.png" if current_state else "ic_mic_muted.png")
+            if icon_path:
+                icon.icon = Image.open(icon_path)
     except Exception as e:
         print(f"Ошибка при обработке клика: {e}")
         traceback.print_exc()
@@ -109,27 +136,44 @@ def create_menu(icon):
 
 def main():
     global icon
-    
-    # Создаем иконки
-    mic_on_icon = Image.open(get_icon_path("ic_mic.png"))
-    mic_off_icon = Image.open(get_icon_path("ic_mic_muted.png"))
-    
-    # Создаем меню
-    menu = pystray.Menu(
-        pystray.MenuItem('Включить/Выключить микрофон', toggle_microphone),
-        pystray.MenuItem('Выход', lambda: icon.stop())
-    )
-    
-    # Создаем иконку в трее
-    icon = pystray.Icon(
-        "mic_control",
-        mic_on_icon if get_microphone_state() else mic_off_icon,
-        "Mic Control",
-        menu
-    )
-    
-    # Запускаем иконку в трее
-    icon.run()
+    try:
+        print("Запуск программы...")
+        
+        # Создаем иконки
+        mic_on_path = get_icon_path("ic_mic.png")
+        mic_off_path = get_icon_path("ic_mic_muted.png")
+        
+        if not mic_on_path or not mic_off_path:
+            print("Ошибка: не удалось загрузить иконки")
+            return
+            
+        mic_on_icon = Image.open(mic_on_path)
+        mic_off_icon = Image.open(mic_off_path)
+        
+        # Создаем меню
+        menu = pystray.Menu(
+            pystray.MenuItem('Включить/Выключить микрофон', toggle_microphone),
+            pystray.MenuItem('Выход', lambda: icon.stop())
+        )
+        
+        # Создаем иконку в трее
+        icon = pystray.Icon(
+            "mic_control",
+            mic_off_icon if get_microphone_state() else mic_on_icon,
+            "Mic Control",
+            menu
+        )
+        
+        # Устанавливаем обработчик клика
+        icon.on_click = on_click
+        
+        print("Программа запущена")
+        # Запускаем иконку в трее
+        icon.run()
+    except Exception as e:
+        print(f"Критическая ошибка: {e}")
+        traceback.print_exc()
+        sys.exit(1)
 
 if __name__ == "__main__":
     try:
