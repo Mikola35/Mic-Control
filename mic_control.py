@@ -15,6 +15,8 @@ from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 import threading
 import time
 from win32com.shell import shell, shellcon
+import keyboard
+import re
 
 try:
     from ctypes import cast, POINTER
@@ -30,6 +32,8 @@ except ImportError as e:
 icon = None
 theme_check_thread = None
 stop_theme_check = False
+hotkey_thread = None
+stop_hotkey_check = False
 
 def get_scale_factor():
     """Получаем масштаб экрана"""
@@ -125,8 +129,10 @@ def on_click(icon, item=None):
         if item is None:  # Это клик по иконке
             print("Клик по иконке")
             toggle_microphone()
+            return True  # Возвращаем True, чтобы показать, что событие обработано
     except Exception as e:
         print(f"Ошибка при обработке клика: {e}")
+    return False
 
 def create_menu(icon):
     return pystray.Menu(
@@ -134,8 +140,37 @@ def create_menu(icon):
         pystray.MenuItem("Выход", lambda: icon.stop())
     )
 
+def parse_hotkey(hotkey_str):
+    """Парсим строку хоткея в формат для keyboard"""
+    try:
+        # Читаем хоткей из файла
+        with open("hotkey.txt", "r") as f:
+            hotkey_str = f.read().strip()
+        
+        # Преобразуем строку в формат keyboard
+        hotkey = hotkey_str.replace("+", "+").lower()
+        return hotkey
+    except Exception as e:
+        print(f"Ошибка при чтении хоткея: {e}")
+        return "ctrl+alt+m"  # Возвращаем хоткей по умолчанию
+
+def hotkey_check_loop():
+    """Проверяем нажатие хоткея"""
+    global stop_hotkey_check
+    hotkey = parse_hotkey("")
+    
+    while not stop_hotkey_check:
+        try:
+            if keyboard.is_pressed(hotkey):
+                print(f"Нажат хоткей: {hotkey}")
+                toggle_microphone()
+                time.sleep(0.5)  # Задержка для предотвращения множественных срабатываний
+        except Exception as e:
+            print(f"Ошибка при проверке хоткея: {e}")
+        time.sleep(0.1)
+
 def main():
-    global icon, theme_check_thread, stop_theme_check
+    global icon, theme_check_thread, stop_theme_check, hotkey_thread, stop_hotkey_check
     try:
         print("Запуск программы...")
         
@@ -180,14 +215,22 @@ def main():
         theme_check_thread.daemon = True
         theme_check_thread.start()
         
+        # Запускаем поток проверки хоткея
+        hotkey_thread = threading.Thread(target=hotkey_check_loop)
+        hotkey_thread.daemon = True
+        hotkey_thread.start()
+        
         print("Программа запущена")
         # Запускаем иконку в трее
         icon.run()
     except Exception as e:
         print(f"Критическая ошибка: {e}")
         stop_theme_check = True
+        stop_hotkey_check = True
         if theme_check_thread:
             theme_check_thread.join()
+        if hotkey_thread:
+            hotkey_thread.join()
         sys.exit(1)
 
 if __name__ == "__main__":
