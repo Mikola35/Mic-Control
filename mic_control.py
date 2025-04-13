@@ -11,7 +11,7 @@ import win32gui
 import win32process
 from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume, IAudioMeterInformation
 import threading
 import time
 from win32com.shell import shell, shellcon
@@ -34,6 +34,8 @@ theme_check_thread = None
 stop_theme_check = False
 hotkey_thread = None
 stop_hotkey_check = False
+volume_check_thread = None
+stop_volume_check = False
 
 def get_scale_factor():
     """Получаем масштаб экрана"""
@@ -169,8 +171,37 @@ def hotkey_check_loop():
             print(f"Ошибка при проверке хоткея: {e}")
         time.sleep(0.1)
 
+def get_microphone_peak():
+    """Получаем текущий уровень входного сигнала микрофона"""
+    try:
+        devices = AudioUtilities.GetMicrophone()
+        if not devices:
+            return 0
+        interface = devices.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None)
+        meter = cast(interface, POINTER(IAudioMeterInformation))
+        return int(meter.GetPeakValue() * 100)
+    except:
+        return 0
+
+def volume_check_loop():
+    """Проверяем уровень входного сигнала и обновляем тултип"""
+    global stop_volume_check, icon
+    last_peak = -1
+    
+    while not stop_volume_check:
+        try:
+            current_peak = get_microphone_peak()
+            if current_peak != last_peak and icon:
+                is_muted = get_microphone().GetMute() if get_microphone() else False
+                status = "Выключен" if is_muted else f"Включен (Уровень: {current_peak}%)"
+                icon.title = f"Mic Control\n{status}"
+                last_peak = current_peak
+        except:
+            pass
+        time.sleep(0.1)
+
 def main():
-    global icon, theme_check_thread, stop_theme_check, hotkey_thread, stop_hotkey_check
+    global icon, theme_check_thread, stop_theme_check, hotkey_thread, stop_hotkey_check, volume_check_thread, stop_volume_check
     try:
         print("Запуск программы...")
         
@@ -220,6 +251,11 @@ def main():
         hotkey_thread.daemon = True
         hotkey_thread.start()
         
+        # Запускаем поток проверки уровня сигнала
+        volume_check_thread = threading.Thread(target=volume_check_loop)
+        volume_check_thread.daemon = True
+        volume_check_thread.start()
+        
         print("Программа запущена")
         # Запускаем иконку в трее
         icon.run()
@@ -227,10 +263,13 @@ def main():
         print(f"Критическая ошибка: {e}")
         stop_theme_check = True
         stop_hotkey_check = True
+        stop_volume_check = True
         if theme_check_thread:
             theme_check_thread.join()
         if hotkey_thread:
             hotkey_thread.join()
+        if volume_check_thread:
+            volume_check_thread.join()
         sys.exit(1)
 
 if __name__ == "__main__":
