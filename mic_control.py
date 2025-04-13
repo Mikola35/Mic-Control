@@ -129,17 +129,24 @@ def on_click(icon, item=None):
     """Обработчик клика по иконке"""
     try:
         if item is None:  # Это клик по иконке
-            print("Клик по иконке")
-            toggle_microphone()
-            return True  # Возвращаем True, чтобы показать, что событие обработано
+            print("Открываем настройки микрофона...")
+            # Открываем системные настройки звука
+            os.system("ms-settings:sound")
+            return True
     except Exception as e:
-        print(f"Ошибка при обработке клика: {e}")
+        print(f"Ошибка при открытии настроек: {e}")
     return False
 
 def create_menu(icon):
+    """Создаем контекстное меню"""
+    # Получаем текущий хоткей
+    hotkey = parse_hotkey("")
+    hotkey_text = hotkey.upper().replace("+", " + ")
+    
     return pystray.Menu(
-        pystray.MenuItem("Включить/Выключить микрофон", lambda: on_click(icon)),
-        pystray.MenuItem("Выход", lambda: icon.stop())
+        pystray.MenuItem(f'Включить/Выключить микрофон ({hotkey_text})', toggle_microphone),
+        pystray.MenuItem('Настройки микрофона', lambda: os.system("ms-settings:sound")),
+        pystray.MenuItem('Выход', lambda: icon.stop())
     )
 
 def parse_hotkey(hotkey_str):
@@ -187,15 +194,27 @@ def volume_check_loop():
     """Проверяем уровень входного сигнала и обновляем тултип"""
     global stop_volume_check, icon
     last_peak = -1
+    last_muted = None
     
     while not stop_volume_check:
         try:
             current_peak = get_microphone_peak()
-            if current_peak != last_peak and icon:
-                is_muted = get_microphone().GetMute() if get_microphone() else False
+            microphone = get_microphone()
+            is_muted = microphone.GetMute() if microphone else True
+            
+            # Обновляем тултип только если изменился уровень или состояние микрофона
+            if (current_peak != last_peak or is_muted != last_muted) and icon:
                 status = "Выключен" if is_muted else f"Включен (Уровень: {current_peak}%)"
                 icon.title = f"Mic Control\n{status}"
+                
+                # Обновляем иконку если изменилось состояние микрофона
+                if is_muted != last_muted:
+                    mic_on_path = get_icon_path("ic_mic.png")
+                    mic_off_path = get_icon_path("ic_mic_muted.png")
+                    icon.icon = Image.open(mic_off_path if is_muted else mic_on_path)
+                
                 last_peak = current_peak
+                last_muted = is_muted
         except:
             pass
         time.sleep(0.1)
@@ -225,10 +244,7 @@ def main():
             return
         
         # Создаем меню
-        menu = pystray.Menu(
-            pystray.MenuItem('Включить/Выключить микрофон', toggle_microphone),
-            pystray.MenuItem('Выход', lambda: icon.stop())
-        )
+        menu = create_menu(icon)
         
         # Создаем иконку в трее
         icon = pystray.Icon(
