@@ -130,14 +130,14 @@ def on_click(icon, item=None):
     try:
         if item is None:  # Это клик по иконке
             print("Открываем настройки микрофона...")
-            # Открываем системные настройки звука
-            os.system("ms-settings:sound")
+            # Открываем системные настройки звука через mmsys.cpl
+            os.system("control mmsys.cpl")
             return True
     except Exception as e:
         print(f"Ошибка при открытии настроек: {e}")
     return False
 
-def create_menu(icon):
+def create_menu():
     """Создаем контекстное меню"""
     # Получаем текущий хоткей
     hotkey = parse_hotkey("")
@@ -145,7 +145,7 @@ def create_menu(icon):
     
     return pystray.Menu(
         pystray.MenuItem(f'Включить/Выключить микрофон ({hotkey_text})', toggle_microphone),
-        pystray.MenuItem('Настройки микрофона', lambda: os.system("ms-settings:sound")),
+        pystray.MenuItem('Настройки микрофона', lambda: os.system("control mmsys.cpl")),
         pystray.MenuItem('Выход', lambda: icon.stop())
     )
 
@@ -244,7 +244,7 @@ def main():
             return
         
         # Создаем меню
-        menu = create_menu(icon)
+        menu = create_menu()
         
         # Создаем иконку в трее
         icon = pystray.Icon(
