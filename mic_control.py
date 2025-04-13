@@ -1,5 +1,5 @@
 import pystray
-from PIL import Image
+from PIL import Image, ImageDraw
 import win32api
 import win32con
 import os
@@ -26,27 +26,25 @@ except ImportError as e:
     print("pip install -r requirements.txt")
     sys.exit(1)
 
+# Глобальная переменная для хранения иконки
+icon = None
+
 def is_dark_theme():
+    """Проверяем, используется ли темная тема Windows"""
     try:
-        # Проверяем системную тему
-        key = win32api.RegOpenKey(win32con.HKEY_CURRENT_USER, 
-                                r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", 0, 
-                                win32con.KEY_READ)
-        value, _ = win32api.RegQueryValueEx(key, "AppsUseLightTheme")
-        win32api.RegCloseKey(key)
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
         return value == 0
     except:
         return False
 
-def get_icon_path(icon_name):
-    try:
-        theme = "dark theme" if is_dark_theme() else "light theme"
-        scale = "2x" if ctypes.windll.shcore.GetScaleFactorForDevice(0) > 100 else "1x"
-        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-        return os.path.join(base_path, "Icons", theme, scale, icon_name)
-    except Exception as e:
-        print(f"Ошибка при получении пути к иконке: {e}")
-        return os.path.join("Icons", "light theme", "1x", icon_name)
+def get_icon_path(filename):
+    """Получаем путь к иконке с учетом темы Windows и масштабирования экрана"""
+    base_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Icons")
+    theme = "dark theme" if is_dark_theme() else "light theme"
+    scale = "2x" if ctypes.windll.shcore.GetScaleFactorForDevice(0) > 100 else "1x"
+    return os.path.join(base_path, theme, scale, filename)
 
 def get_microphone():
     try:
@@ -70,16 +68,21 @@ def get_microphone_state():
     return False
 
 def toggle_microphone():
+    """Переключаем состояние микрофона"""
     try:
-        microphone = get_microphone()
-        if microphone:
-            current_state = microphone.GetMute()
-            microphone.SetMute(not current_state, None)
-            return not current_state
+        devices = AudioUtilities.GetMicrophone()
+        if not devices:
+            return
+        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        volume = cast(interface, POINTER(IAudioEndpointVolume))
+        current_state = volume.GetMute()
+        volume.SetMute(1 - current_state, None)
+        
+        # Обновляем иконку
+        if icon:
+            icon.icon = Image.open(get_icon_path("ic_mic.png" if not current_state else "ic_mic_muted.png"))
     except Exception as e:
         print(f"Ошибка при переключении микрофона: {e}")
-        traceback.print_exc()
-    return False
 
 def on_click(icon, item=None):
     try:
@@ -105,6 +108,8 @@ def create_menu(icon):
     )
 
 def main():
+    global icon
+    
     # Создаем иконки
     mic_on_icon = Image.open(get_icon_path("ic_mic.png"))
     mic_off_icon = Image.open(get_icon_path("ic_mic_muted.png"))
