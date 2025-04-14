@@ -63,6 +63,23 @@ def get_icon_path(filename):
     print(f"Путь к иконке: {path}")
     return path
 
+def get_volume_icon_path(is_muted, peak):
+    theme = "dark theme" if is_dark_theme() else "light theme"
+    if is_muted:
+        icon_name = "ic_mic_muted.ico"
+    else:
+        if peak <= 0:
+            icon_name = "ic_mic.ico"
+        elif peak > 15:
+            icon_name = "ic_mic_vol-10.ico"
+        else:
+            # 1-15% делим на 9 ступеней
+            level = min(9, max(1, int((peak - 1) / (15 / 9)) + 1))
+            icon_name = f"ic_mic_vol-{level:02}.ico"
+    path = os.path.join("Icons", theme, icon_name)
+    print(f"Путь к иконке: {path}")
+    return path
+
 def update_icon():
     """Обновляем иконку с учетом текущей темы"""
     global icon
@@ -197,29 +214,66 @@ def volume_check_loop():
     global stop_volume_check, icon
     last_peak = -1
     last_muted = None
+    current_level = None  # для плавной смены иконки
     
     while not stop_volume_check:
         try:
             current_peak = get_microphone_peak()
             microphone = get_microphone()
             is_muted = microphone.GetMute() if microphone else True
-            
-            # Обновляем тултип только если изменился уровень или состояние микрофона
+
+            # Определяем целевой уровень для иконки
+            if is_muted:
+                target_level = 'muted'
+            elif current_peak <= 0:
+                target_level = 'zero'
+            elif current_peak > 7:
+                target_level = 10
+            else:
+                # 1-7% делим на 9 ступеней
+                level = min(9, max(1, int((current_peak - 1) / (7 / 9)) + 1))
+                target_level = level
+
+            # Инициализация
+            if current_level is None:
+                current_level = target_level
+
+            # Плавное движение к целевому уровню
+            if isinstance(target_level, int) and isinstance(current_level, int):
+                if current_level < target_level:
+                    current_level += 1
+                elif current_level > target_level:
+                    current_level -= 1
+            else:
+                current_level = target_level
+
+            # Формируем имя иконки
+            if is_muted:
+                icon_name = "ic_mic_muted.ico"
+            elif current_level == 'zero':
+                icon_name = "ic_mic.ico"
+            elif isinstance(current_level, int):
+                if current_level == 10:
+                    icon_name = "ic_mic_vol-10.ico"
+                else:
+                    icon_name = f"ic_mic_vol-{current_level:02}.ico"
+            else:
+                icon_name = "ic_mic.ico"
+
+            theme = "dark theme" if is_dark_theme() else "light theme"
+            icon_path = os.path.join("Icons", theme, icon_name)
+
+            # Обновляем тултип и иконку только если что-то поменялось
             if (current_peak != last_peak or is_muted != last_muted) and icon:
                 status = "Выключен" if is_muted else f"Включен (Уровень: {current_peak}%)"
                 icon.title = f"Mic Control\n{status}"
-                
-                # Обновляем иконку если изменилось состояние микрофона
-                if is_muted != last_muted:
-                    mic_on_path = get_icon_path("ic_mic.ico")
-                    mic_off_path = get_icon_path("ic_mic_muted.ico")
-                    icon.icon = Image.open(mic_off_path if is_muted else mic_on_path)
-                
-                last_peak = current_peak
-                last_muted = is_muted
+            if icon:
+                icon.icon = Image.open(icon_path)
+            last_peak = current_peak
+            last_muted = is_muted
         except:
             pass
-        time.sleep(0.1)
+        time.sleep(0.3)
 
 def cleanup():
     """Очищаем ресурсы"""
