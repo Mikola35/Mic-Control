@@ -58,10 +58,8 @@ def is_dark_theme():
         return False
 
 def get_icon_path(filename):
-    """Получаем путь к иконке с учетом темы и масштаба"""
     theme = "dark theme" if is_dark_theme() else "light theme"
-    scale = get_scale_factor()
-    path = os.path.join("Icons", theme, scale, filename)
+    path = os.path.join("Icons", theme, filename.replace('.png', '.ico'))
     print(f"Путь к иконке: {path}")
     return path
 
@@ -73,7 +71,7 @@ def update_icon():
             microphone = get_microphone()
             if microphone:
                 is_muted = microphone.GetMute()
-                icon_path = get_icon_path("ic_mic.png" if not is_muted else "ic_mic_muted.png")
+                icon_path = get_icon_path("ic_mic.ico" if not is_muted else "ic_mic_muted.ico")
                 icon.icon = Image.open(icon_path)
         except Exception as e:
             print(f"Ошибка при обновлении иконки: {e}")
@@ -132,23 +130,6 @@ def toggle_microphone():
             return new_state == 0
     except Exception as e:
         print(f"Ошибка при переключении микрофона: {e}")
-    return False
-
-def on_click(icon, item=None):
-    """Обработчик клика по иконке"""
-    try:
-        print(f"Клик по иконке: item={item}")
-        if item is None:  # Это клик по иконке
-            print("Это клик по иконке (не по пункту меню)")
-            print("Открываем настройки микрофона...")
-            # Открываем системные настройки звука через mmsys.cpl
-            os.system("control mmsys.cpl")
-            return True
-        else:
-            print(f"Это клик по пункту меню: {item.text}")
-    except Exception as e:
-        print(f"Ошибка при обработке клика: {e}")
-        traceback.print_exc()
     return False
 
 def create_menu():
@@ -230,8 +211,8 @@ def volume_check_loop():
                 
                 # Обновляем иконку если изменилось состояние микрофона
                 if is_muted != last_muted:
-                    mic_on_path = get_icon_path("ic_mic.png")
-                    mic_off_path = get_icon_path("ic_mic_muted.png")
+                    mic_on_path = get_icon_path("ic_mic.ico")
+                    mic_off_path = get_icon_path("ic_mic_muted.ico")
                     icon.icon = Image.open(mic_off_path if is_muted else mic_on_path)
                 
                 last_peak = current_peak
@@ -271,8 +252,8 @@ def main():
             
         # Загружаем иконки
         try:
-            mic_on_path = get_icon_path("ic_mic.png")
-            mic_off_path = get_icon_path("ic_mic_muted.png")
+            mic_on_path = get_icon_path("ic_mic.ico")
+            mic_off_path = get_icon_path("ic_mic_muted.ico")
             print(f"Путь к иконке включенного микрофона: {mic_on_path}")
             print(f"Путь к иконке выключенного микрофона: {mic_off_path}")
             
@@ -292,9 +273,6 @@ def main():
             "Mic Control",
             menu
         )
-        
-        # Устанавливаем обработчик клика
-        icon.on_click = on_click
         
         # Запускаем поток проверки темы
         theme_check_thread = threading.Thread(target=theme_check_loop)
