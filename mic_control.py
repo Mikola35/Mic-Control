@@ -117,7 +117,6 @@ def get_microphone():
                 return None
             interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
             microphone = cast(interface, POINTER(IAudioEndpointVolume))
-            
             # Получаем доступ к измерителю уровня
             interface = devices.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None)
             meter = cast(interface, POINTER(IAudioMeterInformation))
@@ -199,78 +198,72 @@ def hotkey_check_loop():
             print(f"Ошибка при проверке хоткея: {e}")
         time.sleep(0.1)
 
-def get_microphone_peak():
-    """Получаем текущий уровень входного сигнала микрофона"""
+def get_microphone_peak_db():
     global meter
+    peak = 0
     try:
         if meter:
-            return int(meter.GetPeakValue() * 100)
+            peak = meter.GetPeakValue()
     except:
         pass
-    return 0
+    return peak
 
 def volume_check_loop():
-    """Проверяем уровень входного сигнала и обновляем тултип"""
     global stop_volume_check, icon
     last_peak = -1
     last_muted = None
-    current_level = None  # для плавной смены иконки
-    
+    last_state = None
+    current_level = None
+    zero_start = None  # время, когда начался 0
+    idle_mode = False
     while not stop_volume_check:
         try:
-            current_peak = get_microphone_peak()
+            peak = get_microphone_peak_db()
+            peak_percent = int(peak * 100)
             microphone = get_microphone()
             is_muted = microphone.GetMute() if microphone else True
+            now = time.time()
 
-            # Определяем целевой уровень для иконки
-            if is_muted:
-                target_level = 'muted'
-            elif current_peak <= 0:
-                target_level = 'zero'
-            elif current_peak > 7:
-                target_level = 10
+            # Таймер для простоя
+            if not is_muted and peak_percent == 0:
+                if zero_start is None:
+                    zero_start = now
+                elif now - zero_start > 5:
+                    idle_mode = True
             else:
-                # 1-7% делим на 9 ступеней
-                level = min(9, max(1, int((current_peak - 1) / (7 / 9)) + 1))
-                target_level = level
+                zero_start = None
+                idle_mode = False
 
-            # Инициализация
-            if current_level is None:
-                current_level = target_level
-
-            # Плавное движение к целевому уровню
-            if isinstance(target_level, int) and isinstance(current_level, int):
-                if current_level < target_level:
-                    current_level += 1
-                elif current_level > target_level:
-                    current_level -= 1
-            else:
-                current_level = target_level
-
-            # Формируем имя иконки
+            # Определяем состояние
             if is_muted:
+                state = 'Заглушён'
                 icon_name = "ic_mic_muted.ico"
-            elif current_level == 'zero':
+            elif idle_mode:
+                state = 'Не используется'
+                icon_name = "ic_mic_idle.ico"
+            elif peak_percent == 0:
+                state = 'Активен'
                 icon_name = "ic_mic.ico"
-            elif isinstance(current_level, int):
-                if current_level == 10:
+            else:
+                state = 'Активен'
+                if peak_percent > 7:
                     icon_name = "ic_mic_vol-10.ico"
                 else:
-                    icon_name = f"ic_mic_vol-{current_level:02}.ico"
-            else:
-                icon_name = "ic_mic.ico"
+                    level = min(9, max(1, int((peak_percent - 1) / (7 / 9)) + 1))
+                    icon_name = f"ic_mic_vol-{level:02}.ico"
 
             theme = "dark theme" if is_dark_theme() else "light theme"
             icon_path = os.path.join("Icons", theme, icon_name)
 
-            # Обновляем тултип и иконку только если что-то поменялось
-            if (current_peak != last_peak or is_muted != last_muted) and icon:
-                status = "Выключен" if is_muted else f"Включен (Уровень: {current_peak}%)"
-                icon.title = f"Mic Control\n{status}"
-            if icon:
+            # Формируем тултип
+            tooltip = f"Mic Control\nСостояние: {state}\nГромкость: {peak_percent}%"
+
+            if (peak_percent != last_peak or is_muted != last_muted or state != last_state) and icon:
+                icon.title = tooltip
                 icon.icon = Image.open(icon_path)
-            last_peak = current_peak
-            last_muted = is_muted
+                last_peak = peak_percent
+                last_muted = is_muted
+                last_state = state
         except:
             pass
         time.sleep(0.3)
