@@ -41,6 +41,7 @@ volume_check_thread = None
 stop_volume_check = False
 microphone = None
 meter = None
+last_mic_id = None
 
 LOG_PATH = "mic_control.log"
 
@@ -74,22 +75,25 @@ def get_icon_path(filename):
     print(f"Путь к иконке: {path}")
     return path
 
-def get_volume_icon_path(is_muted, peak):
-    theme = "dark theme" if is_dark_theme() else "light theme"
-    if is_muted:
-        icon_name = "ic_mic_muted.ico"
+def get_volume_icon_name(peak_percent):
+    if peak_percent == 0:
+        return "ic_mic.ico"
+    elif peak_percent <= 3:
+        return "ic_mic_vol-03.ico"
+    elif peak_percent <= 7:
+        return "ic_mic_vol-04.ico"
+    elif peak_percent <= 15:
+        return "ic_mic_vol-05.ico"
+    elif peak_percent <= 25:
+        return "ic_mic_vol-06.ico"
+    elif peak_percent <= 40:
+        return "ic_mic_vol-07.ico"
+    elif peak_percent <= 60:
+        return "ic_mic_vol-08.ico"
+    elif peak_percent <= 80:
+        return "ic_mic_vol-09.ico"
     else:
-        if peak <= 0:
-            icon_name = "ic_mic.ico"
-        elif peak > 15:
-            icon_name = "ic_mic_vol-10.ico"
-        else:
-            # 1-15% делим на 9 ступеней
-            level = min(9, max(1, int((peak - 1) / (15 / 9)) + 1))
-            icon_name = f"ic_mic_vol-{level:02}.ico"
-    path = os.path.join("Icons", theme, icon_name)
-    print(f"Путь к иконке: {path}")
-    return path
+        return "ic_mic_vol-10.ico"
 
 def update_icon():
     """Обновляем иконку с учетом текущей темы"""
@@ -119,21 +123,35 @@ def theme_check_loop():
 
 def get_microphone():
     """Получаем доступ к микрофону"""
-    global microphone, meter
+    global microphone, meter, last_mic_id
     try:
-        if microphone is None:
+        current_id = get_default_mic_id_coreaudio()
+        # Если id сменился или объекты невалидны — пересоздаём
+        if (
+            microphone is None or
+            meter is None or
+            getattr(microphone, 'GetId', lambda: None)() != current_id or
+            last_mic_id != current_id
+        ):
             devices = AudioUtilities.GetMicrophone()
             if not devices:
                 print("Микрофон не найден")
+                microphone = None
+                meter = None
+                last_mic_id = None
                 return None
             interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
             microphone = cast(interface, POINTER(IAudioEndpointVolume))
             # Получаем доступ к измерителю уровня
             interface = devices.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None)
             meter = cast(interface, POINTER(IAudioMeterInformation))
+            last_mic_id = current_id
         return microphone
     except Exception as e:
         print(f"Ошибка при получении микрофона: {e}")
+        microphone = None
+        meter = None
+        last_mic_id = None
         return None
 
 def get_microphone_state():
@@ -342,16 +360,9 @@ def volume_check_loop():
             elif idle_mode:
                 state = 'Не используется'
                 icon_name = "ic_mic_idle.ico"
-            elif peak_percent == 0:
-                state = 'Активен'
-                icon_name = "ic_mic.ico"
             else:
                 state = 'Активен'
-                if peak_percent > 7:
-                    icon_name = "ic_mic_vol-10.ico"
-                else:
-                    level = min(9, max(1, int((peak_percent - 1) / (7 / 9)) + 1))
-                    icon_name = f"ic_mic_vol-{level:02}.ico"
+                icon_name = get_volume_icon_name(peak_percent)
 
             theme = "dark theme" if is_dark_theme() else "light theme"
             icon_path = os.path.join("Icons", theme, icon_name)
@@ -369,7 +380,7 @@ def volume_check_loop():
             last_muted = is_muted
         except Exception as e:
             log(f"[MicControl] Ошибка в volume_check_loop: {e}")
-        time.sleep(0.3)
+        time.sleep(0.1)
 
 def cleanup():
     """Очищаем ресурсы"""
