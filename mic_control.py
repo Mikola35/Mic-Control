@@ -194,6 +194,41 @@ def get_default_mic_id_pycaw():
         print(f"[MicControl] Не удалось получить id и имя микрофона через pycaw: {e}")
         return None, None
 
+def get_default_mic_id_coreaudio():
+    try:
+        from pycaw.utils import AudioUtilities
+        # Получаем IMMDeviceEnumerator через pycaw
+        enumerator = AudioUtilities.GetDeviceEnumerator()
+        eCapture = 1
+        eMultimedia = 1
+        device = enumerator.GetDefaultAudioEndpoint(eCapture, eMultimedia)
+        return device.GetId()
+    except Exception as e:
+        log(f"[MicControl] Не удалось получить id микрофона через CoreAudio/pycaw: {e}")
+        return None
+
+def get_friendly_name_by_id_pycaw(device_id):
+    try:
+        from pycaw.pycaw import AudioUtilities
+        devices = AudioUtilities.GetAllDevices()
+        for d in devices:
+            if getattr(d, 'id', None) == device_id:
+                return getattr(d, 'FriendlyName', None)
+        return None
+    except Exception as e:
+        log(f"[MicControl] Не удалось найти FriendlyName по id через pycaw: {e}")
+        return None
+
+def default_mic_monitor_loop():
+    last_id = None
+    while True:
+        mic_id = get_default_mic_id_coreaudio()
+        if mic_id != last_id:
+            mic_name = get_friendly_name_by_id_pycaw(mic_id)
+            log(f"[CoreAudio] Текущий дефолтный микрофон: id={mic_id}, name={mic_name}")
+            last_id = mic_id
+        time.sleep(1)
+
 def toggle_microphone():
     """Переключаем состояние микрофона"""
     try:
@@ -360,6 +395,8 @@ def cleanup():
 def print_all_audio_devices():
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
     devices = AudioUtilities.GetAllDevices()
+    # Получаем id дефолтного микрофона
+    default_mic_id = get_default_mic_id_coreaudio()
     inputs = [d for d in devices if str(getattr(d, 'id', '')).startswith('{0.0.1.')]
     outputs = [d for d in devices if str(getattr(d, 'id', '')).startswith('{0.0.0.')]
     # Сортировка по FriendlyName
@@ -368,7 +405,7 @@ def print_all_audio_devices():
     # INPUT
     with open("audio_devices_input.txt", "w", encoding="utf-8") as f:
         f.write("INPUT (микрофоны):\n")
-        f.write(f"{'N':<3} {'id':<60} {'FriendlyName':<90} {'Mute':<6} {'state':<30} {'data_flow':<20} {'type':<40}\n")
+        f.write(f"{'N':<3} {'id':<60} {'FriendlyName':<90} {'Default':<7} {'Mute':<6} {'state':<30} {'data_flow':<20} {'type':<40}\n")
         for i, d in enumerate(inputs):
             mute = ""
             if str(getattr(d, 'state', '')) == 'AudioDeviceState.Active':
@@ -377,7 +414,8 @@ def print_all_audio_devices():
                     mute = "Yes" if endpoint.GetMute() else "No"
                 except:
                     mute = ""
-            f.write(f"{i+1:<3} {getattr(d, 'id', ''):<60} {getattr(d, 'FriendlyName', ''):<90} {mute:<6} {str(getattr(d, 'state', '')):<30} {str(getattr(d, 'data_flow', '')):<20} {str(type(d)):<40}\n")
+            is_default = "✓" if getattr(d, 'id', None) == default_mic_id else ""
+            f.write(f"{i+1:<3} {getattr(d, 'id', ''):<60} {getattr(d, 'FriendlyName', ''):<90} {is_default:<7} {mute:<6} {str(getattr(d, 'state', '')):<30} {str(getattr(d, 'data_flow', '')):<20} {str(type(d)):<40}\n")
         f.write("\n---\n")
     # OUTPUT
     with open("audio_devices_output.txt", "w", encoding="utf-8") as f:
@@ -451,6 +489,7 @@ def print_default_mic_on_start():
 def main():
     global icon, theme_check_thread, stop_theme_check, hotkey_thread, stop_hotkey_check, volume_check_thread, stop_volume_check
     try:
+        threading.Thread(target=default_mic_monitor_loop, daemon=True).start()
         print_default_mic_on_start()
         print('Вызов write_registry_audio_tables()')
         write_registry_audio_tables()
