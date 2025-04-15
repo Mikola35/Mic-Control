@@ -309,11 +309,16 @@ def get_microphone_peak_db():
         pass
     return peak
 
+def get_default_mic_name():
+    mic_id = get_default_mic_id_coreaudio()
+    return get_friendly_name_by_id_pycaw(mic_id)
+
 def volume_check_loop():
     global stop_volume_check, icon
     last_peak = -1
     last_muted = None
     last_state = None
+    last_mic_name = None
     current_level = None
     zero_start = None  # время, когда начался 0
     idle_mode = False
@@ -361,13 +366,15 @@ def volume_check_loop():
             icon_path = os.path.join("Icons", theme, icon_name)
 
             # Формируем тултип
-            tooltip = f"Mic Control\nСостояние: {state}\nГромкость: {peak_percent}%"
+            mic_name = get_default_mic_name()
+            tooltip = f"🎤 {mic_name}"
 
-            if (peak_percent != last_peak or is_muted != last_muted or state != last_state) and icon:
+            if (peak_percent != last_peak or is_muted != last_muted or state != last_state or mic_name != last_mic_name) and icon:
                 icon.title = tooltip
                 icon.icon = Image.open(icon_path)
                 last_peak = peak_percent
                 last_state = state
+                last_mic_name = mic_name
             last_muted = is_muted
         except Exception as e:
             log(f"[MicControl] Ошибка в volume_check_loop: {e}")
