@@ -45,14 +45,7 @@ meter = None
 LOG_PATH = "mic_control.log"
 
 def log(msg):
-    now = datetime.datetime.now().strftime("%H:%M:%S")
-    line = f"[{now}] {msg}"
-    print(line)
-    try:
-        with open(LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except Exception as e:
-        print(f"[MicControl] Ошибка записи в лог: {e}")
+    pass  # Отключено по просьбе пользователя, ничего не пишем в лог
 
 # Очищаем лог при запуске
 with open(LOG_PATH, "w", encoding="utf-8") as f:
@@ -219,16 +212,6 @@ def get_friendly_name_by_id_pycaw(device_id):
         log(f"[MicControl] Не удалось найти FriendlyName по id через pycaw: {e}")
         return None
 
-def default_mic_monitor_loop():
-    last_id = None
-    while True:
-        mic_id = get_default_mic_id_coreaudio()
-        if mic_id != last_id:
-            mic_name = get_friendly_name_by_id_pycaw(mic_id)
-            log(f"[CoreAudio] Текущий дефолтный микрофон: id={mic_id}, name={mic_name}")
-            last_id = mic_id
-        time.sleep(1)
-
 def toggle_microphone():
     """Переключаем состояние микрофона"""
     try:
@@ -314,20 +297,28 @@ def get_default_mic_name():
     return get_friendly_name_by_id_pycaw(mic_id)
 
 def volume_check_loop():
-    global stop_volume_check, icon
+    global stop_volume_check, icon, microphone, meter
     last_peak = -1
     last_muted = None
     last_state = None
     last_mic_name = None
+    last_mic_id = None
     current_level = None
     zero_start = None  # время, когда начался 0
     idle_mode = False
     while not stop_volume_check:
         try:
+            # Проверяем id дефолтного микрофона
+            mic_id = get_default_mic_id_coreaudio()
+            if mic_id != last_mic_id:
+                microphone = None
+                meter = None
+                last_mic_id = mic_id
+
             peak = get_microphone_peak_db()
             peak_percent = int(peak * 100)
-            microphone = get_microphone()
-            is_muted = microphone.GetMute() if microphone else True
+            microphone_obj = get_microphone()
+            is_muted = microphone_obj.GetMute() if microphone_obj else True
             now = time.time()
 
             # Показываем если мьют изменился не по хоткею
@@ -367,7 +358,7 @@ def volume_check_loop():
 
             # Формируем тултип
             mic_name = get_default_mic_name()
-            tooltip = f"🎤 {mic_name}"
+            tooltip = f"{mic_name}"
 
             if (peak_percent != last_peak or is_muted != last_muted or state != last_state or mic_name != last_mic_name) and icon:
                 icon.title = tooltip
@@ -432,12 +423,6 @@ def print_all_audio_devices():
             f.write(f"{i+1:<3} {getattr(d, 'id', ''):<60} {getattr(d, 'FriendlyName', ''):<90} {str(getattr(d, 'state', '')):<30} {str(getattr(d, 'data_flow', '')):<20} {str(type(d)):<40}\n")
         f.write("\n---\n")
 
-def audio_devices_update_loop():
-    pythoncom.CoInitialize()
-    while True:
-        print_all_audio_devices()
-        time.sleep(1)
-
 def write_registry_audio_tables():
     import winreg
     root = r"SYSTEM\\CurrentControlSet\\Enum\\SWD\\MMDEVAPI"
@@ -496,11 +481,9 @@ def print_default_mic_on_start():
 def main():
     global icon, theme_check_thread, stop_theme_check, hotkey_thread, stop_hotkey_check, volume_check_thread, stop_volume_check
     try:
-        threading.Thread(target=default_mic_monitor_loop, daemon=True).start()
         print_default_mic_on_start()
         print('Вызов write_registry_audio_tables()')
         write_registry_audio_tables()
-        threading.Thread(target=audio_devices_update_loop, daemon=True).start()
         print("Запуск программы...")
         
         # Проверяем микрофон
