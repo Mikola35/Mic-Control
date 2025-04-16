@@ -20,6 +20,10 @@ import pythoncom
 import winreg
 import datetime
 import win32com.client
+import tkinter as tk
+from tkinter import simpledialog, messagebox
+import json
+import customtkinter as ctk
 
 try:
     from ctypes import cast, POINTER
@@ -44,6 +48,7 @@ meter = None
 last_mic_id = None
 
 LOG_PATH = "mic_control.log"
+SETTINGS_PATH = "settings.json"
 
 def log(msg):
     pass  # Отключено по просьбе пользователя, ничего не пишем в лог
@@ -250,34 +255,200 @@ def toggle_microphone():
         log(f"Ошибка при переключении микрофона: {e}")
     return False
 
+def load_settings():
+    try:
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return {"show_volume": True, "hotkey": "CTRL+ALT+M"}
+
+def save_settings(settings):
+    with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+        json.dump(settings, f)
+
+def open_settings_window():
+    try:
+        import sys
+        import os
+        import customtkinter as ctk
+        import datetime
+        global stop_hotkey_check, hotkey_thread
+
+        HOTKEY_LOG = "hotkey_capture.log"
+
+        # --- Пауза хоткей-ловушки ---
+        stop_hotkey_check = True
+        if hotkey_thread:
+            hotkey_thread.join()
+        # ---------------------------
+
+        ctk.set_appearance_mode("system")
+        ctk.set_default_color_theme("blue")
+
+        def center(win):
+            win.update_idletasks()
+            w = win.winfo_width()
+            h = win.winfo_height()
+            ws = win.winfo_screenwidth()
+            hs = win.winfo_screenheight()
+            x = (ws // 2) - (w // 2)
+            y = (hs // 2) - (h // 2)
+            win.geometry(f'+{x}+{y}')
+
+        last_logged_keys = {"set": None}
+
+        def log_hotkey_event(event_type, key_set):
+            key_tuple = tuple(sorted(key_set))
+            if key_tuple != last_logged_keys["set"]:
+                now = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+                with open(HOTKEY_LOG, "a", encoding="utf-8") as f:
+                    f.write(f"[{now}] {event_type}: {'+'.join(key_tuple) if key_tuple else '[NONE]'}\n")
+                last_logged_keys["set"] = key_tuple
+
+        def save_hotkey(new_hotkey):
+            settings["hotkey"] = new_hotkey
+            save_settings(settings)
+            btn_hotkey.configure(text=new_hotkey)
+
+        def norm_key(key):
+            if key in ["CONTROL", "CTRL"]:
+                return "CTRL"
+            if key == "ALT":
+                return "ALT"
+            if key == "SHIFT":
+                return "SHIFT"
+            if len(key) == 1:
+                return key.upper()
+            return key.upper()
+
+        def on_hotkey_click(event=None):
+            btn_hotkey.configure(text="...нажмите сочетание...")
+            btn_hotkey.unbind('<Button-1>')
+            root.bind_all('<KeyPress>', on_key_press)
+            root.bind_all('<KeyRelease>', on_key_release)
+            pressed_keys.clear()
+            last_hotkey[0] = btn_hotkey.cget("text")  # сохраняем старый хоткей
+            last_logged_keys["set"] = None
+            with open(HOTKEY_LOG, "w", encoding="utf-8") as f:
+                f.write("")
+
+        pressed_keys = set()
+        last_hotkey = [""]
+        capturing = {"active": False}
+
+        def on_key_press(event):
+            capturing["active"] = True
+            key = event.keysym.upper()
+            if key in ["SHIFT_L", "SHIFT_R", "CONTROL_L", "CONTROL_R", "ALT_L", "ALT_R"]:
+                key = key.replace("_L", "").replace("_R", "")
+            key = norm_key(key)
+            pressed_keys.add(key)
+            display = "+".join(sorted(pressed_keys))
+            btn_hotkey.configure(text=display)
+            last_hotkey.append(display)
+            log_hotkey_event("PRESS", pressed_keys)
+
+        def on_key_release(event):
+            key = event.keysym.upper()
+            if key in ["SHIFT_L", "SHIFT_R", "CONTROL_L", "CONTROL_R", "ALT_L", "ALT_R"]:
+                key = key.replace("_L", "").replace("_R", "")
+            key = norm_key(key)
+            if key in pressed_keys:
+                pressed_keys.remove(key)
+            log_hotkey_event("RELEASE", pressed_keys)
+            if capturing["active"] and not pressed_keys:
+                capturing["active"] = False
+                hotkey = last_hotkey[-1].replace("...нажмите сочетание...", "").strip()
+                mods = {"CTRL", "ALT", "SHIFT"}
+                parts = [k for k in hotkey.split("+") if k]
+                if any(k not in mods for k in parts):
+                    save_hotkey(hotkey)
+                else:
+                    btn_hotkey.configure(text=last_hotkey[0])
+                btn_hotkey.icursor("end") if hasattr(btn_hotkey, 'icursor') else None
+                root.unbind_all('<KeyPress>')
+                root.unbind_all('<KeyRelease>')
+                btn_hotkey.bind('<Button-1>', on_hotkey_click)
+
+        def on_check():
+            settings["show_volume"] = var_show_volume.get()
+            save_settings(settings)
+
+        settings = load_settings()
+
+        root = ctk.CTk()
+        root.title("Настройки Mic Control")
+        root.resizable(False, False)
+        root.geometry("840x280")
+
+        icon_path = os.path.abspath("app_icon.ico")
+        if os.path.exists(icon_path):
+            try:
+                root.iconbitmap(icon_path)
+            except Exception:
+                pass
+
+        current = settings.get("hotkey", "CTRL+ALT+M")
+
+        frame = ctk.CTkFrame(root)
+        frame.pack(pady=40, padx=40, fill="x")
+        label1 = ctk.CTkLabel(frame, text="Горячая клавиша для мьюта - ", font=("Segoe UI", 22))
+        label1.pack(side="left", padx=(0, 10))
+        btn_hotkey = ctk.CTkButton(frame, text=current, width=250, height=48, font=("Segoe UI", 22, "bold"), fg_color="#e0e0e0", text_color="#222", hover_color="#d0d0d0")
+        btn_hotkey.pack(side="left")
+        btn_hotkey.bind('<Button-1>', on_hotkey_click)
+
+        var_show_volume = ctk.BooleanVar(value=settings.get("show_volume", True))
+        chk = ctk.CTkCheckBox(root, text="Отображать громкость в иконке", variable=var_show_volume, command=on_check, font=("Segoe UI", 20))
+        chk.pack(pady=10)
+
+        btn_close = ctk.CTkButton(root, text="Закрыть", command=root.destroy, width=180, height=48, font=("Segoe UI", 20))
+        btn_close.pack(pady=30)
+
+        root.after(10, lambda: center(root))
+        root.mainloop()
+
+        # --- Возобновляем хоткей-ловушку после закрытия окна ---
+        stop_hotkey_check = False
+        def start_hotkey_thread():
+            global hotkey_thread
+            hotkey_thread = threading.Thread(target=hotkey_check_loop)
+            hotkey_thread.daemon = True
+            hotkey_thread.start()
+        start_hotkey_thread()
+        # ------------------------------------------------------
+    except Exception as e:
+        print(f"[MicControl] Ошибка в окне настроек: {e}")
+        import traceback
+        traceback.print_exc()
+
 def create_menu():
     """Создаем контекстное меню"""
     # Получаем текущий хоткей
     hotkey = parse_hotkey("")
     hotkey_text = hotkey.upper().replace("+", " + ")
-    
+
     def on_toggle():
         toggle_microphone()
-    
+
     def on_settings():
-        os.system("control mmsys.cpl")
-    
+        threading.Thread(target=open_settings_window, daemon=True).start()
+
     def on_exit():
         icon.stop()
-    
+
     return pystray.Menu(
         pystray.MenuItem(f'Включить/Выключить микрофон ({hotkey_text})', on_toggle),
-        pystray.MenuItem('Настройки микрофона', on_settings),
+        pystray.MenuItem('Настройки', on_settings),
         pystray.MenuItem('Выход', on_exit)
     )
 
 def parse_hotkey(hotkey_str):
     """Парсим строку хоткея в формат для keyboard"""
     try:
-        # Читаем хоткей из файла
-        with open("hotkey.txt", "r") as f:
-            hotkey_str = f.read().strip()
-        
+        # Читаем хоткей из settings.json
+        settings = load_settings()
+        hotkey_str = settings.get("hotkey", "CTRL+ALT+M")
         # Преобразуем строку в формат keyboard
         hotkey = hotkey_str.replace("+", "+").lower()
         return hotkey
@@ -315,7 +486,7 @@ def get_default_mic_name():
     return get_friendly_name_by_id_pycaw(mic_id)
 
 def volume_check_loop():
-    global stop_volume_check, icon, microphone, meter
+    global stop_volume_check, icon, microphone, meter, last_mic_id
     last_peak = -1
     last_muted = None
     last_state = None
@@ -324,6 +495,7 @@ def volume_check_loop():
     current_level = None
     zero_start = None  # время, когда начался 0
     idle_mode = False
+    force_meter_reinit = False
     while not stop_volume_check:
         try:
             # Проверяем id дефолтного микрофона
@@ -332,8 +504,23 @@ def volume_check_loop():
                 microphone = None
                 meter = None
                 last_mic_id = mic_id
+                force_meter_reinit = True
 
-            peak = get_microphone_peak_db()
+            # Если после смены микрофона уровень всегда 0 — пробуем пересоздать meter
+            if force_meter_reinit:
+                devices = AudioUtilities.GetMicrophone()
+                if devices:
+                    interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                    microphone = cast(interface, POINTER(IAudioEndpointVolume))
+                    interface = devices.Activate(IAudioMeterInformation._iid_, CLSCTX_ALL, None)
+                    meter = cast(interface, POINTER(IAudioMeterInformation))
+                # Проверяем, появился ли уровень
+                peak = get_microphone_peak_db()
+                if peak > 0:
+                    force_meter_reinit = False
+            else:
+                peak = get_microphone_peak_db()
+
             peak_percent = int(peak * 100)
             microphone_obj = get_microphone()
             is_muted = microphone_obj.GetMute() if microphone_obj else True
